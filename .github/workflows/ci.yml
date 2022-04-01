@@ -52,14 +52,19 @@ jobs:
         with:
           command: deny
           args: check Licenses # check that all of deps have an ok license.
-      - name: install cmake
-        run: apt-get -y install cmake
       - name: cargo doc
         uses: actions-rs/cargo@v1
         with:
           command: doc
           args: --no-deps --all-features --document-private-items
-
+      - uses: c-hive/gha-yarn-cache@v2
+        with:
+          directory: quickwit-ui
+      - name: Install JS dependencies
+        run: yarn --cwd quickwit-ui install
+      - name: Lint react app
+        run: yarn --cwd quickwit-ui lint
+        
   test:
     name: Run unit tests (no [ignored])
     runs-on: ubuntu-latest
@@ -89,6 +94,13 @@ jobs:
           profile: minimal
           toolchain: stable
       - uses: Swatinem/rust-cache@v1
+      - uses: c-hive/gha-yarn-cache@v2
+        with:
+          directory: quickwit-ui
+      - name: Install JS dependencies
+        run: yarn --cwd quickwit-ui install
+      - name: Run react tests
+        run: yarn --cwd quickwit-ui test
       - name: Compile tests
         run: cargo test --no-run --locked
       - name: Run tests
