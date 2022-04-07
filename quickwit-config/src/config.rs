@@ -18,7 +18,6 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 use std::env;
-use std::ffi::OsStr;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
@@ -28,7 +27,7 @@ use json_comments::StripComments;
 use once_cell::sync::OnceCell;
 use quickwit_common::net::{get_socket_addr, parse_socket_addr_with_default_port};
 use quickwit_common::new_coolid;
-use quickwit_common::uri::Uri;
+use quickwit_common::uri::{Extension, Uri};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -200,11 +199,11 @@ impl QuickwitConfig {
     }
 
     async fn from_uri(uri: &Uri, config_content: &[u8]) -> anyhow::Result<Self> {
-        let parser_fn = match Path::new(uri.as_ref()).extension().and_then(OsStr::to_str) {
-            Some("json") => Self::from_json,
-            Some("toml") => Self::from_toml,
-            Some("yaml") | Some("yml") => Self::from_yaml,
-            Some(extension) => bail!(
+        let parser_fn = match uri.extension() {
+            Some(Extension::Json) => Self::from_json,
+            Some(Extension::Toml) => Self::from_toml,
+            Some(Extension::Yaml) => Self::from_yaml,
+            Some(Extension::Unknown(extension)) => bail!(
                 "Failed to read quickwit config file `{}`: file extension `.{}` is not supported. \
                  Supported file formats and extensions are JSON (.json), TOML (.toml), and YAML \
                  (.yaml or .yml).",

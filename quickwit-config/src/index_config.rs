@@ -18,15 +18,13 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::OsStr;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context};
 use byte_unit::Byte;
 use json_comments::StripComments;
-use quickwit_common::uri::Uri;
+use quickwit_common::uri::{Extension, Uri};
 use quickwit_doc_mapper::{
     DefaultDocMapperBuilder, DocMapper, FieldMappingEntry, SortBy, SortByConfig, SortOrder,
 };
@@ -225,17 +223,17 @@ pub struct IndexConfig {
 impl IndexConfig {
     // Parses IndexConfig from given uri and config content.
     pub async fn load(uri: &Uri, file_content: &[u8]) -> anyhow::Result<Self> {
-        let config = IndexConfig::from_uri(uri, file_content).await?;
+        let config = Self::from_uri(uri, file_content).await?;
         config.validate()?;
         Ok(config)
     }
 
     async fn from_uri(uri: &Uri, file_content: &[u8]) -> anyhow::Result<Self> {
-        let parser_fn = match Path::new(uri.as_ref()).extension().and_then(OsStr::to_str) {
-            Some("json") => Self::from_json,
-            Some("toml") => Self::from_toml,
-            Some("yaml") | Some("yml") => Self::from_yaml,
-            Some(extension) => bail!(
+        let parser_fn = match uri.extension() {
+            Some(Extension::Json) => Self::from_json,
+            Some(Extension::Toml) => Self::from_toml,
+            Some(Extension::Yaml) => Self::from_yaml,
+            Some(Extension::Unknown(extension)) => bail!(
                 "Failed to read index config file `{}`: file extension `.{}` is not supported. \
                  Supported file formats and extensions are JSON (.json), TOML (.toml), and YAML \
                  (.yaml or .yml).",
