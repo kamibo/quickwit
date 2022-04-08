@@ -42,6 +42,25 @@ pub enum FieldMappingType {
 }
 
 impl FieldMappingType {
+
+    pub fn is_stored(&self) -> bool {
+        match self {
+            FieldMappingType::Text(text_options, _) => {
+                text_options.is_stored()
+            },
+            FieldMappingType::I64(options, _) | FieldMappingType::U64(options, _) | FieldMappingType::F64(options, _) |
+            FieldMappingType::Date(options, _) => {
+                options.is_stored()
+            }
+            FieldMappingType::Bytes(options, _) => {
+                options.is_stored()
+            },
+            FieldMappingType::Object(options) => {
+                false
+            },
+        }
+    }
+
     ///
     pub fn type_with_cardinality(&self) -> String {
         let cardinality = match &self {

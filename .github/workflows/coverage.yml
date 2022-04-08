@@ -103,7 +103,7 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-${{ hashFiles('Cargo.lock') }}
-            ${{ runner.os }}-cargo-test
+            ${{ runner.os }}cargo-test
 
       - name: Install awslocal
         run: pip install awscli-local

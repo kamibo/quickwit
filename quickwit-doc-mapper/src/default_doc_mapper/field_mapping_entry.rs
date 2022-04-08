@@ -497,258 +497,322 @@ impl FieldPath {
 // if we want to add some syntaxic sugar in the mapping.
 // Main drawback: we have a bunch of mixed parameters in it but
 // seems to be reasonable.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+// #[derive(Clone, Serialize, Deserialize)]
+// #[serde(deny_unknown_fields)]
+// struct FieldMappingEntryForSerialization {
+//     name: String,
+//     #[serde(rename = "type")]
+//     type_with_cardinality: String,
+//     #[serde(default = "default_as_true")]
+//     stored: bool,
+//     #[serde(default)]
+//     fast: bool,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     indexed: Option<bool>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     fieldnorms: Option<bool>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     tokenizer: Option<String>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     record: Option<IndexRecordOption>,
+//     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+//     field_mappings: Vec<FieldMappingEntryForSerialization>,
+// }
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+// #[serde(deny_unknown_fields)]
 struct FieldMappingEntryForSerialization {
     name: String,
-    #[serde(rename = "type")]
-    type_with_cardinality: String,
-    #[serde(default = "default_as_true")]
+    #[serde(flatten)]
+    typed_field_mapping: TypedFieldMappingEntryForSerialization,
+    // #[serde(default)]
+    // fast: bool,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // indexed: Option<bool>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // fieldnorms: Option<bool>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // tokenizer: Option<String>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // record: Option<IndexRecordOption>,
+    // #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // field_mappings: Vec<FieldMappingEntryForSerialization>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct TextOptionsForSerialization {
+    #[serde(flatten)]
+    indexing: Option<TextFieldIndexing>,
+    #[serde(default="default_as_true")]
     stored: bool,
-    #[serde(default)]
-    fast: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    indexed: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fieldnorms: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tokenizer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    record: Option<IndexRecordOption>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    field_mappings: Vec<FieldMappingEntryForSerialization>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum TypedFieldMappingEntryForSerialization {
+    #[serde(rename="text")]
+    Text(TextOptionsForSerialization),
+    #[serde(rename="array<text>")]
+    TextArray(TextOptionsForSerialization),
+}
+
+impl TypedFieldMappingEntryForSerialization {
+    pub fn cardinality(&self) -> Cardinality {
+        match self {
+            TypedFieldMappingEntryForSerialization::Text(_) => Cardinality::SingleValue,
+            TypedFieldMappingEntryForSerialization::TextArray(_) => Cardinality::MultiValues,
+        }
+    }
 }
 
 impl TryFrom<FieldMappingEntryForSerialization> for FieldMappingEntry {
     type Error = anyhow::Error;
 
     fn try_from(value: FieldMappingEntryForSerialization) -> anyhow::Result<Self> {
-        let field_type = match value.field_type_str() {
-            "text" => value.new_text()?,
-            "i64" => value.new_i64()?,
-            "u64" => value.new_u64()?,
-            "f64" => value.new_f64()?,
-            "date" => value.new_date()?,
-            "bytes" => value.new_bytes()?,
-            "object" => value.new_object()?,
-            type_str => bail!(
-                "Field `{}` has an unknown type: `{}`.",
-                value.name,
-                type_str
-            ),
-        };
-        validate_field_mapping_name(&value.name)?;
-        Ok(FieldMappingEntry::new(value.name, field_type))
+        Ok(FieldMappingEntry {
+            name: value.name,
+            mapping_type: FieldMappingType::from(value.typed_field_mapping),
+            field_entries: Vec::new(),
+            fast_field_entries: Vec::new(),
+        })
+    }
+        // let field_type = match value.field_type_str() {
+        //     "text" => value.new_text()?,
+        //     "i64" => value.new_i64()?,
+        //     "u64" => value.new_u64()?,
+        //     "f64" => value.new_f64()?,
+        //     "date" => value.new_date()?,
+        //     "bytes" => value.new_bytes()?,
+        //     "object" => value.new_object()?,
+        //     type_str => bail!(
+        //         "Field `{}` has an unknown type: `{}`.",
+        //         value.name,
+        //         type_str
+        //     ),
+        // };
+        // validate_field_mapping_name(&value.name)?;
+        // Ok(FieldMappingEntry::new(value.name, field_type))
+}
+
+impl From<TypedFieldMappingEntryForSerialization> for FieldMappingType {
+    fn from(typed_field_mapping_entry: TypedFieldMappingEntryForSerialization) -> Self {
+        let cardinality = typed_field_mapping_entry.cardinality();
+        match typed_field_mapping_entry {
+            TypedFieldMappingEntryForSerialization::Text(text_options_for_serialization) |
+            TypedFieldMappingEntryForSerialization::TextArray(text_options_for_serialization) => {
+                FieldMappingType::Text(TextOptions::from(text_options_for_serialization), cardinality)
+            },
+        }
+
+    }
+}
+
+impl From<TextOptions> for TextOptionsForSerialization {
+    fn from(text_options: TextOptions) -> Self {
+        TextOptionsForSerialization {
+            indexing: text_options.get_indexing_options().cloned(),
+            stored: text_options.is_stored(),
+        }
+    }
+}
+
+impl From<TextOptionsForSerialization> for TextOptions {
+    fn from(text_options_for_serialization: TextOptionsForSerialization) -> Self {
+        let mut text_options = TextOptions::default();
+        if text_options_for_serialization.stored {
+            text_options = text_options.set_stored();
+        }
+        if let Some(indexing_option) = text_options_for_serialization.indexing {
+            text_options = text_options.set_indexing_options(indexing_option);
+        }
+        text_options
+    }
+}
+
+impl From<FieldMappingType> for TypedFieldMappingEntryForSerialization  {
+    fn from(field_mapping_type: FieldMappingType) -> Self {
+        match field_mapping_type {
+            FieldMappingType::Text(text_options, cardinality) => {
+                let text_options = TextOptionsForSerialization::from(text_options);
+                match cardinality {
+                    Cardinality::SingleValue => {
+                        TypedFieldMappingEntryForSerialization::Text(text_options)
+                    },
+                    Cardinality::MultiValues => {
+                        TypedFieldMappingEntryForSerialization::TextArray(text_options)
+                    },
+                }
+            },
+            _ => {
+                unimplemented!()
+            }
+        }
     }
 }
 
 impl From<FieldMappingEntry> for FieldMappingEntryForSerialization {
     fn from(value: FieldMappingEntry) -> FieldMappingEntryForSerialization {
-        let field_mappings = value
-            .field_mappings()
-            .unwrap_or_default()
-            .into_iter()
-            .map(FieldMappingEntryForSerialization::from)
-            .collect();
+        // let field_mappings = value
+        //     .field_mappings()
+        //     .unwrap_or_default()
+        //     .into_iter()
+        //     .map(FieldMappingEntryForSerialization::from)
+        //     .collect();
+
         let type_with_cardinality = value.mapping_type.type_with_cardinality();
-        let mut fast = false;
-        let mut indexed = None;
-        let mut fieldnorms = None;
-        let mut record = None;
-        let mut stored = false;
-        let mut tokenizer: Option<String> = None;
-        match value.mapping_type {
-            FieldMappingType::Text(text_options, _) => {
-                stored = text_options.is_stored();
-                if let Some(indexing_options) = text_options.get_indexing_options() {
-                    tokenizer = Some(indexing_options.tokenizer().to_owned());
-                    record = Some(indexing_options.index_option());
-                    indexed = Some(true);
-                    fieldnorms = Some(indexing_options.fieldnorms());
-                } else {
-                    indexed = Some(false);
-                    fieldnorms = Some(false);
-                }
-            }
-            FieldMappingType::I64(options, _)
-            | FieldMappingType::U64(options, _)
-            | FieldMappingType::F64(options, _)
-            | FieldMappingType::Date(options, _) => {
-                stored = options.is_stored();
-                indexed = Some(options.is_indexed());
-                fast = options.get_fastfield_cardinality().is_some();
-            }
-            FieldMappingType::Bytes(options, _) => {
-                stored = options.is_stored();
-                indexed = Some(options.is_indexed());
-                fast = options.is_fast();
-            }
-            _ => (),
-        }
 
         FieldMappingEntryForSerialization {
             name: value.name,
-            type_with_cardinality,
-            fast,
-            indexed,
-            fieldnorms,
-            record,
-            stored,
-            tokenizer,
-            field_mappings,
+            typed_field_mapping: TypedFieldMappingEntryForSerialization::from(value.mapping_type),
         }
     }
 }
 
 impl FieldMappingEntryForSerialization {
-    fn is_array(&self) -> bool {
-        self.type_with_cardinality.starts_with("array<")
-            && self.type_with_cardinality.ends_with('>')
-    }
+    // fn is_array(&self) -> bool {
+    //     self.type_with_cardinality.starts_with("array<")
+    //         && self.type_with_cardinality.ends_with('>')
+    // }
 
-    fn cardinality(&self) -> Cardinality {
-        if self.is_array() {
-            Cardinality::MultiValues
-        } else {
-            Cardinality::SingleValue
-        }
-    }
+    // fn cardinality(&self) -> Cardinality {
+    //     unimplemented!()
+    // }
 
-    fn field_type_str(&self) -> &str {
-        if self.is_array() {
-            &self.type_with_cardinality[6..self.type_with_cardinality.len() - 1]
-        } else {
-            &self.type_with_cardinality
-        }
-    }
+    // fn field_type_str(&self) -> &str {
+    //     if self.is_array() {
+    //         &self.type_with_cardinality[6..self.type_with_cardinality.len() - 1]
+    //     } else {
+    //         &self.type_with_cardinality
+    //     }
+    // }
 
-    fn new_text(&self) -> anyhow::Result<FieldMappingType> {
-        if self.fast {
-            bail!(
-                "Error when parsing field `{}`: fast=true not yet supported for text field.",
-                self.name
-            )
-        }
-        let mut options = TextOptions::default();
+    // fn new_text(&self) -> anyhow::Result<FieldMappingType> {
+    //     if self.fast {
+    //         bail!(
+    //             "Error when parsing field `{}`: fast=true not yet supported for text field.",
+    //             self.name
+    //         )
+    //     }
+    //     let mut options = TextOptions::default();
 
-        if self.indexed.unwrap_or(true) {
-            let mut indexing_options = TextFieldIndexing::default();
-            indexing_options = indexing_options.set_fieldnorms(self.fieldnorms.unwrap_or(false));
-            if let Some(index_option) = self.record {
-                indexing_options = indexing_options.set_index_option(index_option);
-            }
-            if let Some(tokenizer) = &self.tokenizer {
-                indexing_options = indexing_options.set_tokenizer(tokenizer);
-            }
-            options = options.set_indexing_options(indexing_options);
-        } else if self.record.is_some() || self.tokenizer.is_some() {
-            bail!(
-                "Error when parsing `{}`: `record` and `tokenizer` parameters are allowed only if \
-                 indexed is true.",
-                self.name
-            )
-        }
-        if self.stored {
-            options = options.set_stored();
-        }
-        Ok(FieldMappingType::Text(options, self.cardinality()))
-    }
+    //     if self.indexed.unwrap_or(true) {
+    //         let mut indexing_options = TextFieldIndexing::default();
+    //         indexing_options = indexing_options.set_fieldnorms(self.fieldnorms.unwrap_or(false));
+    //         if let Some(index_option) = self.record {
+    //             indexing_options = indexing_options.set_index_option(index_option);
+    //         }
+    //         if let Some(tokenizer) = &self.tokenizer {
+    //             indexing_options = indexing_options.set_tokenizer(tokenizer);
+    //         }
+    //         options = options.set_indexing_options(indexing_options);
+    //     } else if self.record.is_some() || self.tokenizer.is_some() {
+    //         bail!(
+    //             "Error when parsing `{}`: `record` and `tokenizer` parameters are allowed only if \
+    //              indexed is true.",
+    //             self.name
+    //         )
+    //     }
+    //     if self.stored {
+    //         options = options.set_stored();
+    //     }
+    //     Ok(FieldMappingType::Text(options, self.cardinality()))
+    // }
 
-    fn new_i64(&self) -> anyhow::Result<FieldMappingType> {
-        let options = self.int_options()?;
-        Ok(FieldMappingType::I64(options, self.cardinality()))
-    }
+    // fn new_i64(&self) -> anyhow::Result<FieldMappingType> {
+    //     let options = self.int_options()?;
+    //     Ok(FieldMappingType::I64(options, self.cardinality()))
+    // }
 
-    fn new_u64(&self) -> anyhow::Result<FieldMappingType> {
-        let options = self.int_options()?;
-        Ok(FieldMappingType::U64(options, self.cardinality()))
-    }
+    // fn new_u64(&self) -> anyhow::Result<FieldMappingType> {
+    //     let options = self.int_options()?;
+    //     Ok(FieldMappingType::U64(options, self.cardinality()))
+    // }
 
-    fn new_f64(&self) -> anyhow::Result<FieldMappingType> {
-        let options = self.int_options()?;
-        Ok(FieldMappingType::F64(options, self.cardinality()))
-    }
+    // fn new_f64(&self) -> anyhow::Result<FieldMappingType> {
+    //     let options = self.int_options()?;
+    //     Ok(FieldMappingType::F64(options, self.cardinality()))
+    // }
 
-    fn new_date(&self) -> anyhow::Result<FieldMappingType> {
-        let options = self.int_options()?;
-        Ok(FieldMappingType::Date(options, self.cardinality()))
-    }
+    // fn new_date(&self) -> anyhow::Result<FieldMappingType> {
+    //     let options = self.int_options()?;
+    //     Ok(FieldMappingType::Date(options, self.cardinality()))
+    // }
 
-    fn new_bytes(&self) -> anyhow::Result<FieldMappingType> {
-        self.check_no_text_options()?;
-        let mut options = BytesOptions::default();
-        if self.stored {
-            options = options.set_stored();
-        }
-        if self.indexed.unwrap_or(true) {
-            options = options.set_indexed();
-            if self.fieldnorms.unwrap_or(false) {
-                options = options.set_fieldnorms();
-            }
-        }
-        if self.fast {
-            options = options.set_fast();
-        }
-        Ok(FieldMappingType::Bytes(options, self.cardinality()))
-    }
+    // fn new_bytes(&self) -> anyhow::Result<FieldMappingType> {
+    //     self.check_no_text_options()?;
+    //     let mut options = BytesOptions::default();
+    //     if self.stored {
+    //         options = options.set_stored();
+    //     }
+    //     if self.indexed.unwrap_or(true) {
+    //         options = options.set_indexed();
+    //         if self.fieldnorms.unwrap_or(false) {
+    //             options = options.set_fieldnorms();
+    //         }
+    //     }
+    //     if self.fast {
+    //         options = options.set_fast();
+    //     }
+    //     Ok(FieldMappingType::Bytes(options, self.cardinality()))
+    // }
 
-    fn new_object(&self) -> anyhow::Result<FieldMappingType> {
-        if self.record.is_some() || self.tokenizer.is_some() {
-            bail!(
-                "Error when parsing field `{}`: `field_mappings` is the only valid parameter.",
-                self.name
-            )
-        }
-        if self.is_array() {
-            bail!(
-                "Error when parsing field `{}`: array of object is not supported.",
-                self.name
-            )
-        }
-        let field_mappings = self
-            .field_mappings
-            .iter()
-            .map(|entry| FieldMappingEntry::try_from(entry.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
-        if field_mappings.is_empty() {
-            bail!(
-                "Error when parsing field `{}`: object type must have at least one field mapping.",
-                self.name
-            )
-        }
-        Ok(FieldMappingType::Object(field_mappings))
-    }
+    // fn new_object(&self) -> anyhow::Result<FieldMappingType> {
+    //     if self.record.is_some() || self.tokenizer.is_some() {
+    //         bail!(
+    //             "Error when parsing field `{}`: `field_mappings` is the only valid parameter.",
+    //             self.name
+    //         )
+    //     }
+    //     if self.is_array() {
+    //         bail!(
+    //             "Error when parsing field `{}`: array of object is not supported.",
+    //             self.name
+    //         )
+    //     }
+    //     let field_mappings = self
+    //         .field_mappings
+    //         .iter()
+    //         .map(|entry| FieldMappingEntry::try_from(entry.clone()))
+    //         .collect::<Result<Vec<_>, _>>()?;
+    //     if field_mappings.is_empty() {
+    //         bail!(
+    //             "Error when parsing field `{}`: object type must have at least one field mapping.",
+    //             self.name
+    //         )
+    //     }
+    //     Ok(FieldMappingType::Object(field_mappings))
+    // }
 
-    fn int_options(&self) -> anyhow::Result<NumericOptions> {
-        self.check_no_text_options()?;
-        let mut options = NumericOptions::default();
-        if self.stored {
-            options = options.set_stored();
-        }
-        // If fast is true, always set cardinality to multivalues to make
-        // simple cardinality changes.
-        if self.fast {
-            options = options.set_fast(self.cardinality());
-        }
-        if self.indexed.unwrap_or(true) {
-            options = options.set_indexed();
-            if self.fieldnorms.unwrap_or(false) {
-                options = options.set_fieldnorm();
-            }
-        }
-        Ok(options)
-    }
+    // fn int_options(&self) -> anyhow::Result<NumericOptions> {
+    //     self.check_no_text_options()?;
+    //     let mut options = NumericOptions::default();
+    //     if self.stored {
+    //         options = options.set_stored();
+    //     }
+    //     // If fast is true, always set cardinality to multivalues to make
+    //     // simple cardinality changes.
+    //     if self.fast {
+    //         options = options.set_fast(self.cardinality());
+    //     }
+    //     if self.indexed.unwrap_or(true) {
+    //         options = options.set_indexed();
+    //         if self.fieldnorms.unwrap_or(false) {
+    //             options = options.set_fieldnorm();
+    //         }
+    //     }
+    //     Ok(options)
+    // }
 
-    fn check_no_text_options(&self) -> anyhow::Result<()> {
-        if self.record.is_some() || self.tokenizer.is_some() {
-            bail!(
-                "Error when parsing `{}`: `record` and `tokenizer` parameters are for text field \
-                 only.",
-                self.name
-            )
-        }
-        Ok(())
-    }
+    // fn check_no_text_options(&self) -> anyhow::Result<()> {
+    //     if self.record.is_some() || self.tokenizer.is_some() {
+    //         bail!(
+    //             "Error when parsing `{}`: `record` and `tokenizer` parameters are for text field \
+    //              only.",
+    //             self.name
+    //         )
+    //     }
+    //     Ok(())
+    // }
 }
 
 /// Error that may happen when parsing
@@ -788,13 +852,14 @@ mod tests {
     use anyhow::bail;
     use matches::matches;
     use serde_json::json;
-    use tantivy::schema::{Cardinality, Value};
+    use tantivy::schema::{Cardinality, Value, STORED, TEXT};
     use tantivy::time::{Date, Month, PrimitiveDateTime, Time};
     use tantivy::DateTime;
 
     use super::FieldMappingEntry;
     use crate::default_doc_mapper::FieldMappingType;
     use crate::DocParsingError;
+    use crate::default_doc_mapper::field_mapping_entry::FieldMappingEntryForSerialization;
 
     const TEXT_MAPPING_ENTRY_VALUE: &str = r#"
         {
@@ -818,6 +883,23 @@ mod tests {
             ]
         }
     "#;
+
+    #[test]
+    fn test_serialize_text_mapping_entry() {
+        let text_options = TEXT | STORED;
+        let mapping_type = FieldMappingType::Text(text_options, Cardinality::SingleValue);
+        let field_mapping_entry = FieldMappingEntry {
+            name: "my_text".to_string(),
+            mapping_type,
+            field_entries: Vec::new(),
+            fast_field_entries: Vec::new(),
+        };
+        let serialized= serde_json::to_string_pretty(&field_mapping_entry).unwrap();
+        dbg!(&serialized);
+        let ser_deser: FieldMappingEntryForSerialization = serde_json::from_str(&serialized).unwrap();
+        dbg!(&ser_deser);
+        // assert_eq!(&ser_deser, "");
+    }
 
     #[test]
     fn test_deserialize_text_mapping_entry() -> anyhow::Result<()> {
