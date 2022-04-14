@@ -176,4 +176,55 @@ mod tests {
         assert_eq!(payload, b"shadower");
         Ok(())
     }
+
+    #[test]
+    fn test_union_directory_exists() -> anyhow::Result<()> {
+        let dir1 = RamDirectory::create();
+        let dir2 = RamDirectory::create();
+        dir1.atomic_write(Path::new("path1"), &b"data1"[..])?;
+        dir2.atomic_write(Path::new("path2"), &b"data2"[..])?;
+        let union_directory = UnionDirectory::union_of(vec![Box::new(dir1), Box::new(dir2)]);
+        assert_eq!(union_directory.exists(Path::new("path1"))?, true);
+        assert_eq!(union_directory.exists(Path::new("path2"))?, true);
+        assert_eq!(union_directory.exists(Path::new("unknown_path"))?, false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_union_directory_delete() -> anyhow::Result<()> {
+        let dir1 = RamDirectory::create();
+        let dir2 = RamDirectory::create();
+        dir1.atomic_write(Path::new("path1"), &b"data1"[..])?;
+        dir1.atomic_write(Path::new("shadowed_path"), &b"shadower"[..])?;
+        dir2.atomic_write(Path::new("shadowed_path"), &b"shadowed"[..])?;
+        let union_directory = UnionDirectory::union_of(vec![Box::new(dir1), Box::new(dir2)]);
+        assert_eq!(union_directory.exists(Path::new("path1"))?, true);
+        assert_eq!(union_directory.exists(Path::new("shadowed_path"))?, true);
+        union_directory.delete(Path::new("path1"))?;
+        assert_eq!(union_directory.exists(Path::new("path1"))?, false);
+        union_directory.delete(Path::new("shadowed_path"))?;
+        assert_eq!(union_directory.exists(Path::new("shadowed_path"))?, false);
+        assert!(union_directory.delete(Path::new("unknown_path")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_union_directory_atomic_write() -> anyhow::Result<()> {
+        let dir1 = RamDirectory::create();
+        let dir2 = RamDirectory::create();
+        let union_directory = UnionDirectory::union_of(vec![Box::new(dir1), Box::new(dir2)]);
+        union_directory.atomic_write(Path::new("path1"), &b"data1"[..])?;
+        union_directory.atomic_write(Path::new("path2"), &b"data2"[..])?;
+        assert_eq!(union_directory.exists(Path::new("path1"))?, true);
+        assert_eq!(union_directory.exists(Path::new("path2"))?, true);
+        {
+            let payload_1 = union_directory.atomic_read(Path::new("path1"))?;
+            assert_eq!(payload_1, b"data1");
+        }
+        {
+            let payload_2 = union_directory.atomic_read(Path::new("path2"))?;
+            assert_eq!(payload_2, b"data2");
+        }
+        Ok(())
+    }
 }
